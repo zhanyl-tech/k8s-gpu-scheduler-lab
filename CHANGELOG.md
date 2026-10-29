@@ -67,6 +67,9 @@ cluster table in the README is Phase 1's and is unchanged.
   factors.
 - Aggregation into `mean±sd` with stability verdicts; seeded bootstrap
   comparisons.
+- `nodes_by_free_gpus`: time-weighted mean number of nodes with each count of
+  free GPUs, by node size: the count NVIDIA's Volcano post reports, which no
+  fragmentation rate here reproduces.
 
 ### Results format
 
@@ -82,6 +85,10 @@ cluster table in the README is Phase 1's and is unchanged.
   `flag_exemptions`, a `paired` field on every comparison, and `design` and
   `bootstrap` in `trace_seed_study`, whose configs' `note` is now the study's
   own note rather than a stability verdict.
+- Still schema 3: each run gains `nodes_by_free_gpus`, each config's
+  `aggregate` its flattened `nodes_by_free_gpus.<size>.<free>` keys (17 on the
+  default fleet; results.json about a fifth larger), and results.md a *Nodes
+  by free GPUs* section.
 
 ### Fixes
 

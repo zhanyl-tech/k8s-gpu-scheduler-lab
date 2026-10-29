@@ -605,3 +605,69 @@ def test_fairness_subtracts_each_accounts_topology_extension() -> None:
     # silently scored as service.
     with pytest.raises(ValueError, match="extension_by_account"):
         compute(dataclasses.replace(obs, extension_by_account={}))
+
+
+# ---- nodes by free GPUs -----------------------------------------------------------------
+
+
+def test_nodes_by_free_gpus_by_hand() -> None:
+    """A 4-GPU pod on big-0 and a 2-GPU pod on small-0 run from 10 s to 40 s.
+    Over the 40 s the samples span, big-0 has 8 free for 10 s and 4 free for
+    30 s; small-1 is idle throughout and small-0 is full for 30 s."""
+    jobs = [Job(1, "a", 0.0, 30.0, gpus=4), Job(2, "a", 0.0, 30.0, gpus=2)]
+    pods = [PodEvent(1, 0, 10.0, 10.0, 40.0, "big-0"), PodEvent(2, 0, 10.0, 10.0, 40.0, "small-0")]
+    samples = [
+        (0.0, {"big-0": 8, "small-0": 2, "small-1": 2}),
+        (10.0, {"big-0": 4, "small-0": 0, "small-1": 2}),
+        (40.0, {"big-0": 8, "small-0": 2, "small-1": 2}),
+    ]
+    m = compute(Observation("t", FLEET, jobs, pods, samples, horizon=40.0))
+    assert m.nodes_by_free_gpus == {
+        "8": {"0": 0.0, "1": 0.0, "2": 0.0, "3": 0.0, "4": 0.75,
+              "5": 0.0, "6": 0.0, "7": 0.0, "8": 0.25},
+        "2": {"0": 0.75, "1": 0.0, "2": 1.25},
+    }
+    assert m.scalars()["nodes_by_free_gpus.2.2"] == 1.25
+
+
+def test_nodes_by_free_gpus_add_up_to_the_fleet_on_the_model() -> None:
+    """At every instant each node has exactly one free count, so a size's
+    means sum to its node count, weighting them by the count gives Definition
+    C's free GPU-seconds over the span, and the rows below all free give C-node."""
+    fleet = load("fleets/default.yaml")
+    obs = run(fleet, generate(WorkloadProfile(job_count=60), seed=0), "D-fifo")
+    m = compute(obs)
+    sizes = {c.gpus: c.count for c in fleet.classes}
+    assert {int(s): sum(v or 0.0 for v in counts.values())
+            for s, counts in m.nodes_by_free_gpus.items()} == pytest.approx(sizes)
+    samples = obs.gpu_free_samples
+    span = samples[-1][0] - samples[0][0]
+    free_mean = sum(
+        sum(free.values()) * (samples[i + 1][0] - t) for i, (t, free) in enumerate(samples[:-1])
+    ) / span
+    free_by_count = [(int(s), int(k), v or 0.0)
+                     for s, counts in m.nodes_by_free_gpus.items() for k, v in counts.items()]
+    assert sum(k * v for _, k, v in free_by_count) == pytest.approx(free_mean)
+    carved = sum(k * v for s, k, v in free_by_count if k < s)
+    assert carved / free_mean == pytest.approx(m.fragmentation_structural)
+
+
+def test_nodes_by_free_gpus_average_over_the_samples_not_the_horizon() -> None:
+    """Samples from 10 s to 50 s of a 100 s horizon: the means are over those
+    40 s, so each size still sums to its node count."""
+    jobs = [Job(1, "a", 10.0, 30.0, gpus=8)]
+    pods = [PodEvent(1, 0, 20.0, 20.0, 50.0, "big-0")]
+    samples = [
+        (10.0, {"big-0": 8, "small-0": 2, "small-1": 2}),
+        (20.0, {"big-0": 0, "small-0": 2, "small-1": 2}),
+        (50.0, {"big-0": 8, "small-0": 2, "small-1": 2}),
+    ]
+    m = compute(Observation("t", FLEET, jobs, pods, samples, horizon=100.0))
+    assert m.nodes_by_free_gpus["8"]["8"] == 0.25 and m.nodes_by_free_gpus["8"]["0"] == 0.75
+    assert m.nodes_by_free_gpus["2"]["2"] == 2.0
+
+
+def test_nodes_by_free_gpus_are_undefined_when_the_samples_span_no_time() -> None:
+    m = compute(Observation("t", FLEET, [], [], [(0.0, {"big-0": 8, "small-0": 2, "small-1": 2})]))
+    assert m.nodes_by_free_gpus == {"8": dict.fromkeys(map(str, range(9))),
+                                    "2": {"0": None, "1": None, "2": None}}

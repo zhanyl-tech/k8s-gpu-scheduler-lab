@@ -265,3 +265,31 @@ def test_time_scaling_line_states_only_what_was_in_force() -> None:
     # A record written before `status` existed is read as recorded, too.
     legacy = {k: v for k, v in summary.items() if k != "experienced_range_sim_seconds"}
     assert "as `make up` configured kube-scheduler" in _ts_line(legacy)
+
+
+def test_results_md_lists_nodes_by_free_gpus_per_node_size() -> None:
+    md = render_markdown(build_report([_run("X")]))
+    section = md.split("## Nodes by free GPUs")[1].split("\n## ")[0]
+    assert "| node GPUs | 8 free | 7 free |" in section and "| 0 free |" in section
+    # big-0 has 7 free for all 100 s, big-1 8 free: one node in each column.
+    row = next(line for line in section.splitlines() if line.startswith("| X "))
+    assert [c.strip() for c in row.split("|")[4:8]] == ["8", "1.0", "1.0", "0.0"]
+
+
+def test_nodes_by_free_gpus_rows_are_blank_above_the_node_size() -> None:
+    fleet = Fleet("t", (NodeClass("big", 1, 8), NodeClass("small", 2, 2)))
+    obs = Observation(
+        "X", fleet, [Job(1, "a", 0.0, 100.0, 1)],
+        [PodEvent(1, 0, 0.0, 0.0, 100.0, "small-0")],
+        [(0.0, {"big-0": 8, "small-0": 1, "small-1": 2}),
+         (100.0, {"big-0": 8, "small-0": 2, "small-1": 2})],
+        horizon=100.0,
+    )
+    md = render_markdown(build_report([compute(obs)]))
+    section = md.split("## Nodes by free GPUs")[1].split("\n## ")[0]
+    rows = [[c.strip() for c in line.split("|")[4:-1]]
+            for line in section.splitlines() if line.startswith("| X ")]
+    assert rows == [
+        ["8", "1.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0", "0.0"],
+        ["2", "", "", "", "", "", "", "1.0", "1.0", "0.0"],
+    ]

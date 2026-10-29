@@ -445,7 +445,8 @@ bin-packing "was reported at KubeCon EU 2026 to cut GPU node fragmentation by
 a third-party blog post that names no talk or speaker, and in neither NVIDIA
 source I checked (the post above, and NVIDIA's KubeCon 2026 post); details in
 [the README](../README.md#the-thesis). A K3 row can at most test NVIDIA's
-operational quantity — nodes by free-GPU count — on this trace and fleet. It
+operational quantity — nodes by free-GPU count,
+[`nodes_by_free_gpus`](metrics.md#nodes-by-free-gpus) — on this trace and fleet. It
 cannot confirm or refute a percentage whose definition, baseline and workload
 are unknown.
 

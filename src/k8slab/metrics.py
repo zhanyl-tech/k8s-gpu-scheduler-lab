@@ -26,6 +26,7 @@ import math
 import statistics
 from collections.abc import Iterable, Sequence
 from dataclasses import asdict, dataclass, field, fields
+from itertools import pairwise
 from typing import Any
 
 from . import topology as topology_mod
@@ -195,6 +196,12 @@ class Metrics:
     #: topology; see docs/metrics.md for why node is the headline.
     fragmentation_structural_rack: float
     fragmentation_structural_switch: float
+    #: Time-weighted mean number of nodes with each count of free GPUs, by
+    #: node size: ``{"8": {"0": ..., "8": ...}, "4": {...}}``, every count
+    #: from 0 to the size present. The quantity NVIDIA's Volcano bin-packing
+    #: post reports (nodes with all four GPUs free), which no fragmentation
+    #: rate here reproduces. ``None`` counts when the samples span no time.
+    nodes_by_free_gpus: dict[str, dict[str, float | None]]
 
     gang_jobs: int
     #: DEPRECATED with ``gang_deadlocked`` and ``gang_deadlock_rate``: a
@@ -313,6 +320,9 @@ class Metrics:
         for bucket, stats in self.wait_by_footprint.items():
             for key, value in stats.items():
                 out[f"wait_by_footprint.{bucket}.{key}"] = value
+        for size, counts in self.nodes_by_free_gpus.items():
+            for free, mean in counts.items():
+                out[f"nodes_by_free_gpus.{size}.{free}"] = mean
         for tier, share in self.placement_tier_share.items():
             out[f"placement_tier_share.{tier}"] = share
         for acct, ratio in self.service_ratio.items():
@@ -645,6 +655,29 @@ def compute(
     # ---- fragmentation C ----------------------------------------------------
     frag_c = structural_fragmentation(topo.capacity(), topo.domains(), samples)
 
+    # ---- nodes by free GPUs -------------------------------------------------
+    # Over the same samples and step convention as C, which has just validated
+    # them: every node present, every free count in [0, capacity]. Zero-GPU
+    # nodes have no free count worth reporting and are left out. Time is summed
+    # per distinct state first: most polls change nothing, as in C.
+    capacity = topo.capacity()
+    node_order = sorted(capacity)
+    state_seconds: dict[tuple[int, ...], float] = {}
+    for (t0, free0), (t1, _) in pairwise(samples):
+        if t1 != t0:
+            state = tuple(map(free0.__getitem__, node_order))
+            state_seconds[state] = state_seconds.get(state, 0.0) + (t1 - t0)
+    node_seconds = {c: [0.0] * (c + 1) for c in sorted(set(capacity.values()), reverse=True) if c}
+    for state, dt in state_seconds.items():
+        for node, free in zip(node_order, state, strict=True):
+            if capacity[node]:
+                node_seconds[capacity[node]][free] += dt
+    span = samples[-1][0] - samples[0][0] if samples else 0.0
+    nodes_by_free_gpus: dict[str, dict[str, float | None]] = {
+        str(c): {str(k): s / span if span > 0 else None for k, s in enumerate(secs)}
+        for c, secs in node_seconds.items()
+    }
+
     # ---- gang behaviour -----------------------------------------------------
     gang_jobs = [j for j in obs.jobs if j.is_gang]
     stalled = 0
@@ -817,6 +850,7 @@ def compute(
         fragmentation_structural=frag_c.rate("node"),
         fragmentation_structural_rack=frag_c.rate("rack"),
         fragmentation_structural_switch=frag_c.rate("switch"),
+        nodes_by_free_gpus=nodes_by_free_gpus,
         gang_jobs=len(gang_jobs),
         gang_stalled=stalled,
         gang_deadlocked=deadlocked,
