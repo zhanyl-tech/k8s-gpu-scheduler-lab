@@ -489,3 +489,7 @@ MIT.
 [kccnc]: https://kccnceu2026.sched.com/
 [ssl]: https://github.com/Zhanyl-tech/slurm-scheduler-lab
 [rca]: https://github.com/Zhanyl-tech/slurm-rca-bench
+
+
+Author: Zhanyl Abdybaeva 
+MS CS (GPU/HPC) student at Georgia Tech. 
