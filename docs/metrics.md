@@ -502,6 +502,51 @@ if it does not, the implementation is wrong.
 > Either way the homogeneous fleet is a control for *whole-node* workloads
 > (exactly 0 under C-node, tested), not a lower bound for mixed ones.
 
+### Nodes by free GPUs
+
+NVIDIA's post reports none of A, B or C. It reports counts, in its text and
+figure captions: nodes with all four GPUs free (18 before bin-packing, 214
+after) and with three free (around 115 before, about nine after),
+before-and-after snapshots of one cluster with no method or time window given.
+`nodes_by_free_gpus` is that count over a whole run. For each node size $c$ in
+the fleet and each $k \in \{0, \dots, c\}$,
+
+$$N_{c,k} = \frac{1}{H'} \int \#\{n : C_n = c,\ \text{free}_n(t) = k\}\,dt$$
+
+where $H'$ is the span from the first free-GPU sample to the last, with C's
+step convention. A node has one free count at every instant, so a size's
+$N_{c,k}$ sum to its node count, and
+
+$$\text{frag}_C^\text{node} = \frac{\sum_c \sum_{k<c} k\,N_{c,k}}{\sum_c \sum_{k} k\,N_{c,k}}$$
+
+since a node is carved exactly when $k < c$
+(`test_nodes_by_free_gpus_add_up_to_the_fleet_on_the_model`). The all-free
+column $N_{c,c}$ is the whole idle nodes; C-node is about the rows between.
+
+On the default trace the all-free column hardly separates the degenerate
+policies. Reference model, kube queue model, means over five repeats, the
+fleet's twelve 8-GPU nodes (D-random: mean ± sd; it is `unstable`, so its row
+does not rank):
+
+| 8-GPU nodes | D-fifo | D-random | D-largest | D-preempt |
+|---|---|---|---|---|
+| 8 of 8 free | 2.85 | 2.61 ± 0.56 | 2.83 | 2.79 |
+| 1 to 7 free | 2.23 | 2.61 ± 0.23 | 2.36 | 1.38 |
+| none free | 6.92 | 6.78 ± 0.40 | 6.81 | 7.83 |
+
+The three deterministic policies keep 2.79 to 2.85 of these nodes whole and
+idle, and D-random's repeats spread wider than that. They differ in the partly
+free middle, where D-preempt leaves 1.38 nodes against D-fifo's 2.23, which
+C-node already measures. A count of idle nodes also grows with every idle
+stretch of the run, so a fleet with less to do reads better; like C, read it
+next to utilization (63 to 67% here).
+
+**What a K3 row can test with it.** Whether bin-packing moves these counts on
+this trace and fleet, and in which direction: NVIDIA's result in kind. Not the
+18 and 214 themselves: those are snapshots of a cluster of 4-GPU nodes and
+thousands of GPUs, under a workload the post describes only as four classes,
+with no trace or job mix, and these are time means over a 26-node fleet.
+
 ## Gang behaviour
 
 A gang job has `gang_size > 1` pods that must all run together. Until the last
@@ -950,15 +995,18 @@ layer's defence.
 ## Computation cost
 
 Every metric pass is linear in pods, jobs or samples, except definition A's
-pending-queue query (a sort, $O((P+S)\log P)$) and definition C's per-sample sum
-over nodes and levels (memoised on identical consecutive states). Measured on
+pending-queue query (a sort, $O((P+S)\log P)$), definition C's per-sample sum
+over nodes and levels (memoised on identical consecutive states) and the
+nodes-by-free-GPUs pass over samples and nodes. Measured on
 the development machine (macOS, Python 3.12.13) for one default-profile
 reference-model run: `metrics.compute` took 0.45–0.54 s before the sweep,
 dominated by the $O(S \times P)$ pending scan (≈10,000 samples × 1,201 pods), and
 0.022–0.030 s after it, with definition C, gang, size-bias and placement metrics
 added. With this revision's full sample validation in definition C and the
 eviction-aware passes it measured 0.029–0.034 s (D-fifo, D-random, D-largest,
-seven timings each).
+seven timings each). `nodes_by_free_gpus` sums time per distinct state first,
+as C does. Measured the same way on 2026-10-28, on a busier machine:
+0.040–0.053 s with it, 0.032–0.040 s for the previous commit.
 
 ## Where the numbers on this page came from
 
@@ -1002,6 +1050,12 @@ unless stated; results directories are gitignored, so re-run to check):
   different experiment and gives different numbers; this page used to leave
   that ambiguous. `tests/test_stats.py::test_documented_small_n_weakness_holds`
   re-runs a smaller replica.
+- **Nodes by free GPUs** (the 8-GPU table in that section): `make bench-model`,
+  re-run on 2026-10-28 once the metric existed. The cells are results.json
+  aggregate means of `nodes_by_free_gpus.8.<k>`, the middle row summed over
+  k = 1 to 7, and D-random's sd from the same keys; results.md rounds to one
+  decimal and has no middle row. Every other number in that results.json was
+  identical to the same command on the previous commit.
 - **Timings:** `time.perf_counter()` around `metrics.compute` on
   `sim.run(fleet, generate(profile_named("default"), seed=0), policy)`.
 - **Pre-fix values quoted as corrections** (D-preempt's Definition A 4.08%,

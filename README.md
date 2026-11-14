@@ -439,6 +439,9 @@ The mechanisms exist and are tested; **none has been exercised on a cluster**.
   GPU-time inside a node (rack, switch) with anything allocated — the
   definition shared with slurm-scheduler-lab through a golden vector; the node
   level is the headline. [metrics.md](docs/metrics.md#definition-c--structural-per-topology-level)
+- **Nodes by free GPUs.** Time-weighted mean number of nodes with each count
+  of free GPUs, by node size: the count NVIDIA's Volcano bin-packing post
+  reports, which no fragmentation rate here reproduces. [metrics.md](docs/metrics.md#nodes-by-free-gpus)
 - **Stranded GPU-hours.** GPU-time gang members hold before every member is
   Running, replacing the thresholded gang deadlock rate (deprecated).
   [metrics.md](docs/metrics.md#gang-behaviour)

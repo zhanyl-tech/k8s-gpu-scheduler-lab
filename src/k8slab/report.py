@@ -536,6 +536,9 @@ def render_markdown(report: Report, docs: str | None = "../docs/metrics.md") -> 
             ],
         ),
         "",
+    ]
+    out += _nodes_by_free_section(aggs)
+    out += [
         "## Gang assembly",
         "",
         "Stranded = GPU-time held by gang members before every member was running. "
@@ -710,6 +713,33 @@ def _plain(value: Any) -> str:
     if isinstance(value, (list, tuple)):
         return ", ".join(_plain(v) for v in value) if value else "—"
     return str(value)
+
+
+def _nodes_by_free_section(aggs: Sequence[Aggregate]) -> list[str]:
+    """One row per config and node size; columns from all GPUs free down to none."""
+    sizes = sorted({int(s) for a in aggs for m in a.runs for s in m.nodes_by_free_gpus},
+                   reverse=True)
+    if not sizes:
+        return []
+    free_counts = range(sizes[0], -1, -1)
+    rows = [
+        [a.config, _src(a), str(a.n), str(s),
+         *(_spread_cell(a, f"nodes_by_free_gpus.{s}.{k}", 1.0, 1) if k <= s else ""
+           for k in free_counts)]
+        for a in aggs
+        for s in sizes
+        if any(str(s) in m.nodes_by_free_gpus for m in a.runs)
+    ]
+    return [
+        "## Nodes by free GPUs",
+        "",
+        "Time-weighted mean number of nodes with each count of free GPUs, by node size. "
+        "NVIDIA's Volcano bin-packing post reports the all-free column, for 4-GPU nodes. "
+        "A blank cell is more free GPUs than the node has; — is undefined.",
+        "",
+        _table(["config", "src", "n", "node GPUs", *(f"{k} free" for k in free_counts)], rows),
+        "",
+    ]
 
 
 def _execution_section(aggs: Sequence[Aggregate]) -> list[str]:
